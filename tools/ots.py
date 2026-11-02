@@ -23,8 +23,13 @@ import subprocess
 import sys
 import urllib.request
 
+# Windows では python-bitcoinlib が OpenSSL を ctypes.util.find_library('ssl') で探して None になり落ちる。
+# Python に付いている libcrypto-3.dll を返すようにしてから読み込む(2026-11-02 Windows で確認)。
 OTS = [sys.executable, "-c",
-       "import sys; from otsclient.ots import main; sys.argv[0] = 'ots'; sys.exit(main())"]
+       "import ctypes.util, os, sys; f = ctypes.util.find_library; "
+       "dll = os.path.join(sys.base_prefix, 'DLLs', 'libcrypto-3.dll'); "
+       "ctypes.util.find_library = lambda n: f(n) or (dll if n in ('ssl', 'ssl.35', 'libeay32') else None); "
+       "from otsclient.ots import main; sys.argv[0] = 'ots'; sys.exit(main())"]
 EXPLORERS = ["https://blockstream.info/api", "https://mempool.space/api"]
 
 
