@@ -84,6 +84,8 @@ def main():
     cmd = sys.argv[1]
     # Windows の PowerShell は *.ots を展開しないので、ここで展開する
     files = [g for a in sys.argv[2:] for g in (sorted(glob.glob(a)) if glob.has_magic(a) else [a])]
+    if not files:
+        sys.exit("エラー: 対象のファイルが 1 つも無い")
     if cmd == "verify":
         results = [verify(f) for f in files]
         sys.exit(0 if all(results) else 1)

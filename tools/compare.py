@@ -15,7 +15,13 @@ def load(path):
         rows = list(csv.reader(f))
     if not rows or rows[0] != ["race_id", "馬番", "確率"]:
         sys.exit(f"エラー: {path}: 見出し行は race_id,馬番,確率")
-    return {(r[0].strip(), int(r[1])): float(r[2]) for r in rows[1:]}
+    out = {}
+    for r in rows[1:]:
+        k = (r[0].strip(), int(r[1]))
+        if k in out:
+            sys.exit(f"エラー: {path}: 同じ馬の行が 2 つある {k}")
+        out[k] = float(r[2])
+    return out
 
 
 a, b = load(sys.argv[1]), load(sys.argv[2])

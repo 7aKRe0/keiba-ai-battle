@@ -33,7 +33,10 @@ ZERO = "0" * 40
 def gh(*args, raw=False):
     r = subprocess.run(["gh", "api", *args], capture_output=True)
     if r.returncode != 0:
-        return None
+        err = r.stderr.decode("utf-8", "replace")
+        if "404" in err or "Not Found" in err:
+            return None  # 無い(ファイルやコミットが存在しない)
+        sys.exit(f"エラー: gh api {' '.join(args)} が失敗した(認証・通信・制限など)。判定を中止する: {err.strip()}")
     return r.stdout if raw else r.stdout.decode("utf-8")
 
 
