@@ -2,6 +2,7 @@
 
 使い方:
     python tools/score.py 結果.csv 提出1.csv [提出2.csv ...] [--detail 明細.csv]
+    python tools/score.py --format-only 提出1.csv [...]   (形式の確認だけ。結果は要らない)
 
 提出 CSV: ファイル名 YYYYMMDD_名前.csv、UTF-8、見出し行 race_id,馬番,確率
     名前ごとに複数の開催日のファイルをまとめて採点する。
@@ -205,11 +206,19 @@ def f6(x):
 
 def main():
     ap = argparse.ArgumentParser(description="ルール 5 節の採点")
-    ap.add_argument("results")
-    ap.add_argument("submissions", nargs="+")
+    ap.add_argument("files", nargs="+", help="結果.csv 提出.csv ...(--format-only のときは提出だけ)")
     ap.add_argument("--detail", help="レースごとの明細を書く CSV のパス")
+    ap.add_argument("--format-only", action="store_true", help="提出 CSV の形式だけを確かめる")
     args = ap.parse_args()
 
+    if args.format_only:
+        for path in args.files:
+            name, sub = read_submission(path)
+            print(f"形式 OK: {path}({name}、{len(sub)} レース、{sum(map(len, sub.values()))} 行)")
+        return
+    if len(args.files) < 2:
+        fail("結果.csv と提出 CSV を 1 つ以上渡す")
+    args.results, args.submissions = args.files[0], args.files[1:]
     races = read_results(args.results)
     subs = {}
     for path in args.submissions:
