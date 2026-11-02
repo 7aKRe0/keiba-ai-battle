@@ -47,6 +47,7 @@ def make(args):
     lines = [f"{sha256(f)}  {f}\n" for f in collect(args.paths) if f != out_rel]
     if not lines:
         sys.exit("エラー: ファイルが 1 つも無い")
+    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     with open(args.output, "w", encoding="utf-8", newline="\n") as f:
         f.writelines(lines)
     print(f"{len(lines)} 件を {out_rel} に書いた。一覧のハッシュ: {sha256(args.output)}")

@@ -17,6 +17,7 @@ verify:  python tools/ots.py verify hashes/20261114_甲.txt.ots [...]
             mempool.space)から取って比べる。2 つとも一致すれば「一致」。
          ノードがあるなら、代わりに `ots verify -f 元のファイル 元のファイル.ots` でよい。
 """
+import glob
 import json
 import re
 import subprocess
@@ -69,8 +70,8 @@ def verify(ots_path):
             print(f"結果: {ots_path}: 不一致")
             return False
         ok += 1
-    if ok == 0:
-        print(f"結果: {ots_path}: エクスプローラに届かず未確認。"
+    if ok < len(EXPLORERS):
+        print(f"結果: {ots_path}: 届いたエクスプローラが {ok}/{len(EXPLORERS)} か所で未確認。"
               f"ブロック {height} の merkle root が {root} かを、別の手段で確かめる")
         return False
     print(f"結果: {ots_path}: 一致(ブロック {height}、エクスプローラ {ok} か所)")
@@ -80,7 +81,9 @@ def verify(ots_path):
 def main():
     if len(sys.argv) < 3 or sys.argv[1] not in ("stamp", "upgrade", "verify"):
         sys.exit(__doc__)
-    cmd, files = sys.argv[1], sys.argv[2:]
+    cmd = sys.argv[1]
+    # Windows の PowerShell は *.ots を展開しないので、ここで展開する
+    files = [g for a in sys.argv[2:] for g in (sorted(glob.glob(a)) if glob.has_magic(a) else [a])]
     if cmd == "verify":
         results = [verify(f) for f in files]
         sys.exit(0 if all(results) else 1)
