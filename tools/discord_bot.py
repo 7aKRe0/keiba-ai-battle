@@ -7,13 +7,18 @@
    ~/競馬AI対決_記録/ に日付ごとに保存する。H-xx で始まる投稿は 仮説一覧.md にも足す。
    毎晩 23 時に #記録 で 1 回だけ「今日の記録は?」と聞く。
 3. 起動したとき、止まっていた間の #質問(返信のない呼び出し)と #記録(✅ のない投稿)を処理する。
+4. ルールのフォーラムでタグを「決定」にするか、スレッドで @まとめ と書くと、Sonnet 5.5 がスレッドを読んで
+   ルール.md・趣旨.md の書き換えの下書きを出す。サーバーの持ち主が下書きに ✅ を付けたら、書き換えて push し、
+   #お知らせ に流す(tools/rule_drafts.py)。
 趣旨.md・ルール.md は GitHub の main から読む(push すれば答えに反映。読めないときはこの PC のファイル)。
 起動: python tools/discord_bot.py (この PC で動いている間だけ動く)
 鍵はリポジトリの外に置く:
   ~/.discord_keiba_token.txt   Discord のボットのトークン
   ~/.anthropic_keiba_key.txt   Claude の API キー
 """
+import asyncio
 import datetime as dt
+import io
 import re
 from pathlib import Path
 
@@ -24,10 +29,17 @@ import anthropic
 import discord
 from discord.ext import tasks
 
+import rule_drafts
+
 HOME = Path.home()
 REPO = Path(__file__).resolve().parent.parent
 QA_CHANNEL_ID = 1567155228183232632  # 疑似ハッカソン_競馬AI の #質問
 LOG_CHANNEL_ID = 1567163631890866336  # 同じく #記録
+FORUM_ID = 1567155224467210303  # 同じく ルール(フォーラム)
+NEWS_ID = 1567155217844277359  # 同じく #お知らせ
+DRAFT_ROLE = "まとめ"
+DECIDED_TAG = "決定"
+DRAFT_FILE = "draft.json"
 LOG_DIR = HOME / "競馬AI対決_記録"
 JST = dt.timezone(dt.timedelta(hours=9))
 NIGHTLY_PROMPT = ("今日、予想と違ったこと・数字が動いたこと・2 つから選んだこと・壊れて直したこと・やめたこと・"
@@ -157,6 +169,67 @@ async def on_message(msg: discord.Message):
         await save_log(msg)
     elif msg.channel.id == QA_CHANNEL_ID and is_called(msg):
         await handle_question(msg)
+    elif getattr(msg.channel, "parent_id", None) == FORUM_ID and any(r.name == DRAFT_ROLE for r in msg.role_mentions):
+        await draft_thread(msg.channel)
+
+
+async def send_long(channel, text: str, **kw) -> discord.Message:
+    chunks = [text[i:i + 1900] for i in range(0, len(text), 1900)]
+    for c in chunks[:-1]:
+        await channel.send(c)
+    return await channel.send(chunks[-1], **kw)
+
+
+async def draft_thread(thread: discord.Thread) -> None:
+    """スレッドの話し合いから、ルールの書き換えの下書きを出す。"""
+    lines = []
+    async for m in thread.history(limit=None, oldest_first=True):
+        if m.author.bot and m.id != thread.id:  # ボットの発言は最初の投稿(今・案・決めること)だけ読む
+            continue
+        lines.append(f"{m.author.display_name}: {m.content}")
+    await thread.send("下書きを作っています(1 分ほどかかります)。")
+    try:
+        draft = await rule_drafts.make_draft(claude, thread.name, "\n\n".join(lines))
+    except Exception as e:  # noqa: BLE001 ボットを止めずにスレッドへ知らせる
+        print(f"draft error: {e!r}")
+        await thread.send(f"下書きを作れませんでした: {e}")
+        return
+    body = rule_drafts.render(draft) + "\n\n**主催がこのメッセージに ✅ を付けると、ルールに反映して push します。**直したいときは、スレッドに書いてから `@まとめ` で出し直してください。"
+    file = discord.File(io.BytesIO(draft.model_dump_json().encode("utf-8")), filename=DRAFT_FILE)
+    await send_long(thread, body, file=file)
+
+
+@bot.event
+async def on_thread_update(before: discord.Thread, after: discord.Thread):
+    was = any(t.name == DECIDED_TAG for t in before.applied_tags)
+    now = any(t.name == DECIDED_TAG for t in after.applied_tags)
+    if after.parent_id == FORUM_ID and now and not was:
+        await draft_thread(after)
+
+
+@bot.event
+async def on_raw_reaction_add(p: discord.RawReactionActionEvent):
+    guild = bot.get_guild(p.guild_id) if p.guild_id else None
+    if str(p.emoji) != "✅" or guild is None or p.user_id != guild.owner_id:
+        return
+    thread = guild.get_thread(p.channel_id) or await bot.fetch_channel(p.channel_id)
+    if getattr(thread, "parent_id", None) != FORUM_ID:
+        return
+    msg = await thread.fetch_message(p.message_id)
+    att = next((a for a in msg.attachments if a.filename == DRAFT_FILE), None)
+    if msg.author != bot.user or att is None or any(r.emoji == "✅" and r.me for r in msg.reactions):
+        return  # 下書きでない、または反映済み
+    draft = rule_drafts.Draft.model_validate_json(await att.read())
+    try:
+        sha = await asyncio.to_thread(rule_drafts.apply_draft, draft, thread.name, thread.jump_url)
+    except Exception as e:  # noqa: BLE001
+        print(f"apply error: {e!r}")
+        await thread.send(f"反映できませんでした(ルールは変えていません): {e}")
+        return
+    await msg.add_reaction("✅")
+    link = f"https://github.com/7aKRe0/keiba-ai-battle/commit/{sha}"
+    await thread.send(f"ルールに反映して push しました: {link}")
+    await bot.get_channel(NEWS_ID).send(f"ルールを変えました: 「{thread.name}」\n{thread.jump_url}\n{link}")
 
 
 async def handle_question(msg: discord.Message) -> None:
