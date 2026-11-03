@@ -5,7 +5,8 @@
    ほかのチャンネルでは反応しない。
 2. #記録 (サーバーの持ち主だけが見える)の持ち主の投稿と画像を、リポジトリの外の
    ~/競馬AI対決_記録/ に日付ごとに保存する。H-xx で始まる投稿は 仮説一覧.md にも足す。
-   毎晩 23 時に #記録 で 1 回だけ「今日の記録は?」と聞く。
+   毎晩 23 時に、その日のコミットからまだ記録していない出来事を H-xx にして足し、#記録 に知らせる
+   (tools/nightly_log.py。返事は要らない)。
 3. 起動したとき、止まっていた間の #質問(返信のない呼び出し)と #記録(✅ のない投稿)を処理する。
 4. ルールのフォーラムでタグを「決定」にするか、スレッドで @まとめ と書くと、Sonnet 5.5 がスレッドを読んで
    ルール.md・趣旨.md の書き換えの下書きを出す。サーバーの持ち主が下書きに ✅ を付けたら、書き換えて push し、
@@ -29,6 +30,7 @@ import anthropic
 import discord
 from discord.ext import tasks
 
+import nightly_log
 import rule_drafts
 
 HOME = Path.home()
@@ -42,8 +44,6 @@ DECIDED_TAG = "決定"
 DRAFT_FILE = "draft.json"
 LOG_DIR = HOME / "競馬AI対決_記録"
 JST = dt.timezone(dt.timedelta(hours=9))
-NIGHTLY_PROMPT = ("今日、予想と違ったこと・数字が動いたこと・2 つから選んだこと・壊れて直したこと・やめたこと・"
-                  "意見が分かれたことはありましたか? あれば H-xx で書いてください(仮説 / 検証 / 結果 / 次へ)。")
 CALL_ROLE = "質問"
 MODEL = "claude-haiku-5-5"
 DOCS = ["趣旨.md", "ルール.md"]
@@ -136,7 +136,12 @@ async def save_log(msg: discord.Message) -> None:
 
 @tasks.loop(time=dt.time(23, 0, tzinfo=JST))
 async def nightly():
-    await bot.get_channel(LOG_CHANNEL_ID).send(NIGHTLY_PROMPT)
+    try:
+        text = await nightly_log.run(claude)
+    except Exception as e:  # noqa: BLE001 ボットを止めずに知らせる
+        print(f"nightly error: {e!r}")
+        text = f"今日の自動まとめに失敗しました: {e}"
+    await bot.get_channel(LOG_CHANNEL_ID).send(text)
 
 
 async def catch_up() -> None:
